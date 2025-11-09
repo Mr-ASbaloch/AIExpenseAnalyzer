@@ -5,161 +5,157 @@ import requests
 import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
-from fpdf import FPDF
-from urllib.parse import quote
 
 # =============================
 # CONFIGURATION
 # =============================
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "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")
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = "llama-3.3-70b-versatile"
-
-st.set_page_config(page_title="AI Expense Analyzer", layout="wide")
+MODEL = "llama-3.3-70b-versatile"  # Groq LLM model
 
 # =============================
-# SESSION STATE
+# HELPER: Groq Chat Request
 # =============================
-if "expenses" not in st.session_state:
-    st.session_state.expenses = []
-
-# =============================
-# FUNCTIONS
-# =============================
-
-def analyze_with_groq(prompt: str):
-    """Send prompt to Groq LLM and return analysis text."""
+def groq_chat(messages, temperature=0.3, max_tokens=800):
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    payload = {
-        "model": MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 400,
-    }
+    payload = {"model": MODEL, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
+    response = requests.post(GROQ_CHAT_URL, headers=headers, json=payload, timeout=60)
+    response.raise_for_status()
+    return response.json()["choices"][0]["message"]["content"].strip()
+
+# =============================
+# HELPER: Analyze Expenses via Groq
+# =============================
+def analyze_expenses(df):
+    system_prompt = """You are an expert financial data analyst.
+Read the provided expense data and produce a JSON object:
+{
+ "summary": "concise paragraph about spending patterns, totals, and category trends",
+ "recommendations": "personalized saving and optimization strategies"
+}
+Return only valid JSON, no explanations.
+"""
+    csv_data = df.to_csv(index=False)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": csv_data}
+    ]
+    reply = groq_chat(messages)
+
+    # Try parsing JSON safely
     try:
-        response = requests.post(GROQ_CHAT_URL, headers=headers, json=payload, timeout=30)
-        data = response.json()
-        return data["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        return f"⚠️ Error contacting Groq API: {e}"
-
-def export_to_pdf(df):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(200, 10, "Expense Report", ln=True, align="C")
-    pdf.set_font("Arial", "", 12)
-
-    for i, row in df.iterrows():
-        pdf.cell(200, 8, f"{row['Date']} - {row['Category']} - Rs {row['Amount']} - {row['Description']}", ln=True)
-
-    buffer = io.BytesIO()
-    pdf.output(buffer)
-    buffer.seek(0)
-    return buffer
-
-def export_to_excel(df):
-    excel_buffer = io.BytesIO()
-    df.to_excel(excel_buffer, index=False, sheet_name="Expenses")
-    excel_buffer.seek(0)
-    return excel_buffer
-
-def export_to_image(fig):
-    img_buffer = io.BytesIO()
-    fig.savefig(img_buffer, format="png", bbox_inches="tight")
-    img_buffer.seek(0)
-    return img_buffer
+        data = json.loads(reply)
+    except Exception:
+        import re
+        match = re.search(r"\{.*\}", reply, re.DOTALL)
+        data = json.loads(match.group(0)) if match else {"summary": reply, "recommendations": ""}
+    return data
 
 # =============================
-# UI - DATA INPUT
+# STREAMLIT APP
 # =============================
+st.set_page_config(page_title="💸 AI Expense Analyzer", layout="wide")
+st.title("💸 AI Expense Analyzer using Groq LLM + Streamlit")
 
-st.title("💸 AI Expense Analyzer (Groq + Streamlit)")
+st.markdown("""
+Easily add your daily expenses and let **Groq LLM** analyze your spending.  
+It will summarize your habits and recommend smart saving strategies 💡.
+""")
 
-with st.expander("➕ Add New Expense", expanded=True):
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        date = st.date_input("Date")
-    with col2:
-        category = st.selectbox("Category", ["Food", "Transport", "Bills", "Shopping", "Other"])
-    with col3:
-        amount = st.number_input("Amount (PKR)", min_value=0.0, step=100.0)
-    with col4:
-        description = st.text_input("Description")
+# -----------------------------
+# Initialize Session
+# -----------------------------
+if "entries" not in st.session_state:
+    st.session_state.entries = []
 
-    if st.button("Add Expense"):
-        if amount > 0 and description:
-            st.session_state.expenses.append({
-                "Date": date.strftime("%Y-%m-%d"),
-                "Category": category,
-                "Amount": amount,
-                "Description": description
-            })
-            st.success("✅ Expense added successfully!")
-        else:
-            st.warning("⚠️ Please enter valid details before adding.")
+# -----------------------------
+# Input Fields
+# -----------------------------
+st.subheader("➕ Add Expense Entry")
 
-# =============================
-# DISPLAY DATA
-# =============================
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    date = st.date_input("Date")
+with col2:
+    category = st.selectbox("Category", ["Food", "Transport", "Bills", "Shopping", "Other"])
+with col3:
+    amount = st.number_input("Amount (PKR)", min_value=0.0, step=100.0)
+with col4:
+    description = st.text_input("Description")
 
-if st.session_state.expenses:
-    df = pd.DataFrame(st.session_state.expenses)
+# Add Entry Button
+if st.button("Add New Row"):
+    if amount > 0 and description:
+        st.session_state.entries.append({
+            "Date": date.strftime("%Y-%m-%d"),
+            "Category": category,
+            "Amount": amount,
+            "Description": description
+        })
+        st.success("✅ Entry added successfully!")
+    else:
+        st.warning("⚠️ Please fill all fields correctly.")
+
+# -----------------------------
+# Display Table
+# -----------------------------
+if st.session_state.entries:
+    df = pd.DataFrame(st.session_state.entries)
     st.dataframe(df, use_container_width=True)
 
-    # =============================
-    # VISUALIZATION
-    # =============================
-    st.subheader("📊 Expense Insights")
+    # Analyze Button
+    if st.button("🔍 Analyze Expenses"):
+        with st.spinner("Analyzing your expenses using Groq..."):
+            results = analyze_expenses(df)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        fig1, ax1 = plt.subplots()
-        df.groupby("Category")["Amount"].sum().plot.pie(autopct="%1.1f%%", ax=ax1)
-        plt.ylabel("")
-        st.pyplot(fig1)
+        st.subheader("📊 Expense Summary")
+        st.write(results.get("summary", "No summary generated."))
 
-    with col2:
-        fig2, ax2 = plt.subplots()
-        df.groupby("Category")["Amount"].sum().plot(kind="bar", ax=ax2)
-        st.pyplot(fig2)
+        st.subheader("💡 AI Recommendations")
+        st.write(results.get("recommendations", "No recommendations generated."))
 
-    # =============================
-    # AI ANALYSIS
-    # =============================
-    st.subheader("🧠 AI Recommendations (Groq)")
+        # Visualizations
+        if not df.empty:
+            cat_sum = df.groupby("Category")["Amount"].sum().sort_values(ascending=False)
 
-    if st.button("Generate AI Expense Analysis"):
-        prompt = f"""
-        Analyze these expenses and give financial insights and saving tips:
-        {df.to_string(index=False)}
-        """
-        with st.spinner("Analyzing your expenses with Groq LLM..."):
-            analysis = analyze_with_groq(prompt)
-        st.text_area("AI Analysis", analysis, height=200)
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("#### 📊 Bar Chart")
+                fig_bar, ax_bar = plt.subplots()
+                cat_sum.plot(kind="bar", ax=ax_bar, color="skyblue")
+                ax_bar.set_title("Spending by Category")
+                st.pyplot(fig_bar)
 
-    # =============================
-    # EXPORT OPTIONS
-    # =============================
-    st.subheader("📤 Export or Share")
-
-    pdf_buffer = export_to_pdf(df)
-    excel_buffer = export_to_excel(df)
-    image_buffer = export_to_image(fig1)
-
-    colA, colB, colC, colD = st.columns(4)
-    with colA:
-        st.download_button("📘 Download Excel", data=excel_buffer, file_name="expenses.xlsx")
-    with colB:
-        st.download_button("📄 Download PDF", data=pdf_buffer, file_name="expenses.pdf")
-    with colC:
-        st.download_button("🖼️ Download Chart Image", data=image_buffer, file_name="chart.png")
-
-    with colD:
-        total = df["Amount"].sum()
-        whatsapp_msg = f"Total Expenses: Rs {total}\n\nTop Categories:\n{df.groupby('Category')['Amount'].sum().to_string()}"
-        whatsapp_link = f"https://wa.me/?text={quote(whatsapp_msg)}"
-        st.markdown(f"[💬 Share via WhatsApp]({whatsapp_link})")
+            with col2:
+                st.markdown("#### 🥧 Pie Chart")
+                fig_pie, ax_pie = plt.subplots()
+                ax_pie.pie(cat_sum, labels=cat_sum.index, autopct="%1.1f%%", startangle=90)
+                ax_pie.axis("equal")
+                st.pyplot(fig_pie)
 
 else:
-    st.info("Add expenses to start analysis.")
+    st.info("No entries yet. Add your first expense above!")
 
+
+
+# -------- FOLLOW-UP CHAT --------
+st.markdown("---")
+st.subheader("🧭 Ask Groq for Deeper Insights")
+st.caption("Ask AI any question about your spending — like 'Where can I save most?'")
+
+user_query = st.text_input("Ask your question:")
+if st.button("💬 Ask AI"):
+    if not user_query.strip():
+        st.warning("Please type a question first.")
+    else:
+        context = f"""
+User question: {user_query}
+Context: Previous summary and recommendations.
+"""
+        with st.spinner("Groq thinking..."):
+            answer = groq_chat([
+                {"role": "system", "content": "You are a helpful AI financial assistant."},
+                {"role": "user", "content": context}
+            ])
+        st.success("Groq's Insight:")
+        st.write(answer)
