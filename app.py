@@ -24,9 +24,17 @@ You can add your daily expenses, view category-wise charts, export your data, an
 # [secrets.toml]
 # GROQ_API_KEY = "your_groq_api_key_here"
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "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")
-GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = "llama-3.3-70b-versatile"
+if "GROQ_API_KEY" in st.secrets:
+    GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+else:
+    GROQ_API_KEY = st.text_input("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", type="password")
+
+if GROQ_API_KEY:
+    client = Groq(api_key=GROQ_API_KEY)
+else:
+    client = None
+    st.warning("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")
+
 # ===========================
 # INITIALIZE STATE
 # ===========================
