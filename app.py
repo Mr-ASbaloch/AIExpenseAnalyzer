@@ -9,7 +9,7 @@ import streamlit as st
 # =============================
 # CONFIGURATION
 # =============================
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "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")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "g")
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "llama-3.3-70b-versatile"  # Groq LLM model
 
