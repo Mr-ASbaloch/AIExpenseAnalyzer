@@ -183,3 +183,30 @@ if st.session_state.expenses:
 
 else:
     st.info("👆 Add your first expense above to start tracking and get AI analysis.")
+
+
+
+
+
+# -------- CHAT-STYLE FOLLOW-UP --------
+st.markdown("---")
+st.subheader("🧭 Ask AI Insights")
+st.caption("Type a natural question about your spending (only uses Groq LLM, no stored data).")
+
+followup = st.text_input("Ask your question:", placeholder="e.g. How can I save more on food?")
+if st.button("💬 Ask Groq"):
+    if not followup.strip():
+        st.warning("Type a question first.")
+    else:
+        context = f"""
+User question: {followup}
+Previously analyzed expense summary: {results.get('summary','')}
+Recommendations: {results.get('recommendations','')}
+"""
+        with st.spinner("Groq thinking..."):
+            answer = groq_chat([
+                {"role": "system", "content": "You are a financial assistant offering clear, empathetic guidance."},
+                {"role": "user", "content": context}
+            ])
+        st.success("Groq's Response:")
+        st.write(answer)
