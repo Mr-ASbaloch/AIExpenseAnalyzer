@@ -1,51 +1,38 @@
-import streamlit as st
+import os
+import io
+import json
+import requests
 import pandas as pd
 import matplotlib.pyplot as plt
-import io
+import streamlit as st
 from datetime import datetime
-from groq import Groq
 
-# ===========================
-# APP CONFIGURATION
-# ===========================
+# =============================
+# CONFIGURATION
+# =============================
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "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")
+GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+MODEL = "llama-3.3-70b-versatile"  # Groq LLM model (adjust if needed)
+
 st.set_page_config(page_title="💸 AI Expense Analyzer", layout="wide")
 st.title("💸 AI Expense Analyzer (Groq + Streamlit)")
 
 st.write("""
 This app helps you **track**, **analyze**, and **optimize** your expenses using **AI-powered insights**.  
-You can add your daily expenses, view category-wise charts, export your data, and get smart recommendations from the Groq LLM model.
+You can add daily expenses, visualize them, export reports, and get personalized saving tips.
 """)
 
-# ===========================
-# SETUP GROQ API KEY & MODEL
-# ===========================
-# You can set your Groq API key directly here OR use Streamlit Secrets.
-# ⚠️ RECOMMENDED: Store the key safely in .streamlit/secrets.toml as shown below:
-# [secrets.toml]
-# GROQ_API_KEY = "your_groq_api_key_here"
-
-if "GROQ_API_KEY" in st.secrets:
-    GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-else:
-    GROQ_API_KEY = st.text_input("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", type="password")
-
-if GROQ_API_KEY:
-    client = Groq(api_key=GROQ_API_KEY)
-else:
-    client = None
-    st.warning("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")
-
-# ===========================
+# =============================
 # INITIALIZE STATE
-# ===========================
+# =============================
 if "expenses" not in st.session_state:
     st.session_state.expenses = []
 
-# ===========================
+# =============================
 # EXPENSE INPUT FORM
-# ===========================
+# =============================
 st.divider()
-st.subheader("➕ Add a New Expense")
+st.subheader("➕ Add New Expense")
 
 with st.form("add_expense"):
     col1, col2, col3, col4 = st.columns(4)
@@ -73,24 +60,24 @@ with st.form("add_expense"):
             })
             st.success("✅ Expense added successfully!")
 
-# ===========================
-# DISPLAY EXPENSE TABLE
-# ===========================
+# =============================
+# DISPLAY EXPENSES
+# =============================
 if st.session_state.expenses:
     df = pd.DataFrame(st.session_state.expenses)
     st.divider()
     st.subheader("📊 Expense Records")
     st.dataframe(df, use_container_width=True)
 
-    # ===========================
-    # CHARTS
-    # ===========================
+    # =============================
+    # VISUALIZATION
+    # =============================
     col1, col2 = st.columns(2)
 
     with col1:
         st.subheader("📈 Bar Chart (Expenses by Category)")
         fig1, ax1 = plt.subplots()
-        df.groupby("Category")["Amount (PKR)"].sum().plot(kind="bar", color="skyblue", ax=ax1)
+        df.groupby("Category")["Amount (PKR)"].sum().plot(kind="bar", color="cornflowerblue", ax=ax1)
         ax1.set_ylabel("Total (PKR)")
         st.pyplot(fig1)
 
@@ -101,9 +88,9 @@ if st.session_state.expenses:
         ax2.set_ylabel("")
         st.pyplot(fig2)
 
-    # ===========================
-    # MONTHLY SUMMARY DASHBOARD
-    # ===========================
+    # =============================
+    # MONTHLY DASHBOARD
+    # =============================
     st.divider()
     st.header("📅 Monthly Summary Dashboard")
 
@@ -123,9 +110,9 @@ if st.session_state.expenses:
     plt.tight_layout()
     st.pyplot(fig3)
 
-    # ===========================
+    # =============================
     # EXPORT OPTIONS
-    # ===========================
+    # =============================
     st.divider()
     st.subheader("📤 Export Options")
 
@@ -141,47 +128,58 @@ if st.session_state.expenses:
     img_buffer.seek(0)
     st.download_button("🖼️ Download Chart Image", img_buffer, "chart.png")
 
-    # PDF (basic text format)
+    # PDF (basic text)
     pdf_buffer = io.BytesIO()
     text_data = df.to_string(index=False)
     pdf_buffer.write(text_data.encode("utf-8"))
     pdf_buffer.seek(0)
     st.download_button("📕 Download PDF", pdf_buffer, "expenses.pdf")
 
-    # WhatsApp share link
+    # WhatsApp share
     summary = f"My total expenses are PKR {total_spent:.2f}. Avg monthly: PKR {avg_spending:.2f}.\n\nTop categories:\n" + df.groupby("Category")["Amount (PKR)"].sum().to_string()
     whatsapp_link = f"https://wa.me/?text={summary}"
     st.markdown(f"[📱 Share Summary on WhatsApp]({whatsapp_link})")
 
-    # ===========================
-    # AI INSIGHTS (GROQ MODEL)
-    # ===========================
+    # =============================
+    # AI INSIGHTS USING GROQ
+    # =============================
     st.divider()
     st.header("🤖 AI Expense Insights (Groq LLM)")
 
     ai_prompt = f"""
     Analyze the following expense data and generate:
-    - A short financial summary.
-    - Bullet-point recommendations for better budgeting.
-    - Suggestions for saving money based on categories.
-    
+    - A financial summary in plain English.
+    - Budget improvement tips.
+    - Smart recommendations to save money in each category.
+
     Expense Data:
     {df.to_string(index=False)}
     """
 
-    if client:
+    if GROQ_API_KEY and GROQ_API_KEY != "YOUR_GROQ_API_KEY":
         try:
             with st.spinner("💬 AI analyzing your expenses..."):
-                response = client.chat.completions.create(
-                    model="llama-3.1-70b-versatile",
-                    messages=[{"role": "user", "content": ai_prompt}]
-                )
-                st.markdown("### 💡 AI Recommendations:")
-                st.write(response.choices[0].message.content)
+                headers = {
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json",
+                }
+                payload = {
+                    "model": MODEL,
+                    "messages": [{"role": "user", "content": ai_prompt}],
+                    "temperature": 0.7,
+                }
+                response = requests.post(GROQ_CHAT_URL, headers=headers, json=payload)
+                if response.status_code == 200:
+                    ai_data = response.json()
+                    message = ai_data["choices"][0]["message"]["content"]
+                    st.markdown("### 💡 AI Recommendations")
+                    st.write(message)
+                else:
+                    st.error(f"Groq API Error {response.status_code}: {response.text}")
         except Exception as e:
             st.error(f"❌ Error fetching AI insights: {e}")
     else:
-        st.info("⚠️ Please enter your Groq API key above to enable AI-powered analysis.")
+        st.warning("⚠️ Add a valid Groq API key in your environment or .streamlit/secrets.toml file.")
 
 else:
-    st.info("👆 Add your first expense above to start analysis and visualization.")
+    st.info("👆 Add your first expense above to start tracking and get AI analysis.")
