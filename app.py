@@ -5,6 +5,7 @@ import requests
 import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
+from rag_model import RAGModel
 
 # =============================
 # CONFIGURATION
@@ -68,6 +69,9 @@ It will summarize your habits and recommend smart saving strategies 💡.
 if "entries" not in st.session_state:
     st.session_state.entries = []
 
+if "rag_model" not in st.session_state:
+    st.session_state.rag_model = RAGModel()
+
 # -----------------------------
 # Input Fields
 # -----------------------------
@@ -86,12 +90,15 @@ with col4:
 # Add Entry Button
 if st.button("Add New Row"):
     if amount > 0 and description:
-        st.session_state.entries.append({
+        entry = {
             "Date": date.strftime("%Y-%m-%d"),
             "Category": category,
             "Amount": amount,
             "Description": description
-        })
+        }
+        st.session_state.entries.append(entry)
+        # Add to RAG model history
+        st.session_state.rag_model.add_expense_to_history(entry)
         st.success("✅ Entry added successfully!")
     else:
         st.warning("⚠️ Please fill all fields correctly.")
@@ -105,7 +112,7 @@ if st.session_state.entries:
 
     # Analyze Button
     if st.button("🔍 Analyze Expenses"):
-        with st.spinner("Analyzing your expenses using Groq..."):
+        with st.spinner("Analyzing your expenses using Groq with RAG..."):
             results = analyze_expenses(df)
 
         st.subheader("📊 Expense Summary")
@@ -113,6 +120,14 @@ if st.session_state.entries:
 
         st.subheader("💡 AI Recommendations")
         st.write(results.get("recommendations", "No recommendations generated."))
+        
+        # Show RAG-enhanced category-specific advice
+        st.subheader("📚 Knowledge Base Insights")
+        top_categories = df.groupby("Category")["Amount"].sum().nlargest(2)
+        for category in top_categories.index:
+            with st.expander(f"💡 Tips for {category}"):
+                advice = st.session_state.rag_model.get_category_specific_advice(category)
+                st.write(advice)
 
         # Visualizations
         if not df.empty:
@@ -140,22 +155,38 @@ else:
 
 # -------- FOLLOW-UP CHAT --------
 st.markdown("---")
-st.subheader("🧭 Ask Groq for Deeper Insights")
-st.caption("Ask AI any question about your spending — like 'Where can I save most?'")
+st.subheader("🧭 Ask Groq with RAG for Deeper Insights")
+st.caption("Ask AI any question about your spending — RAG will retrieve relevant financial advice to enhance responses.")
 
 user_query = st.text_input("Ask your question:")
-if st.button("💬 Ask AI"):
+if st.button("💬 Ask AI with RAG"):
     if not user_query.strip():
         st.warning("Please type a question first.")
+    elif not st.session_state.entries:
+        st.warning("Please add some expenses first to get context-aware insights.")
     else:
-        context = f"""
-User question: {user_query}
-Context: Previous summary and recommendations.
-"""
-        with st.spinner("Groq thinking..."):
+        df = pd.DataFrame(st.session_state.entries)
+        
+        # Build expense context
+        expense_context = st.session_state.rag_model.build_context_from_expenses(df)
+        
+        # Generate RAG-enhanced prompt
+        enhanced_prompt, relevant_docs = st.session_state.rag_model.generate_rag_enhanced_prompt(
+            user_query, expense_context
+        )
+        
+        with st.spinner("Groq thinking with RAG context..."):
             answer = groq_chat([
-                {"role": "system", "content": "You are a helpful AI financial assistant."},
-                {"role": "user", "content": context}
+                {"role": "system", "content": "You are a helpful AI financial assistant with access to expense data and financial knowledge."},
+                {"role": "user", "content": enhanced_prompt}
             ])
-        st.success("Groq's Insight:")
+        
+        st.success("🤖 RAG-Enhanced Insight:")
         st.write(answer)
+        
+        # Show retrieved knowledge sources
+        if relevant_docs:
+            with st.expander("📖 Knowledge Sources Used"):
+                for i, doc in enumerate(relevant_docs, 1):
+                    st.markdown(f"**{i}. {doc['category']}**")
+                    st.write(doc['content'])
